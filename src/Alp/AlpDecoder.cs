@@ -23,17 +23,20 @@ public static class AlpDecoder
     public static double[] Decode(AlpEncodedData data)
     {
         double[] result = new double[data.EncodedValues.Length];
+        long[] encodedValues = data.EncodedValues;
+        long factMul = AlpConstants.FactArray[data.Factor];
+        double fracE = AlpConstants.FracArray[data.Exponent];
 
-        // Bulk decode all encoded integers
-        for (int i = 0; i < data.EncodedValues.Length; i++)
+        for (int i = 0; i < encodedValues.Length; i++)
         {
-            result[i] = DecodeValue(data.EncodedValues[i], data.Exponent, data.Factor);
+            result[i] = encodedValues[i] * factMul * fracE;
         }
 
-        // Patch exceptions back in
-        for (int i = 0; i < data.ExceptionPositions.Length; i++)
+        int[] positions = data.ExceptionPositions;
+        double[] exceptions = data.ExceptionValues;
+        for (int i = 0; i < positions.Length; i++)
         {
-            result[data.ExceptionPositions[i]] = data.ExceptionValues[i];
+            result[positions[i]] = exceptions[i];
         }
 
         return result;
