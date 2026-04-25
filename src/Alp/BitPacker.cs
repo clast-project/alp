@@ -1,12 +1,15 @@
-using System.Numerics;
+// Copyright (c) clast-project. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
-namespace Alp;
+namespace Clast.Alp;
 
 /// <summary>
 /// Packs and unpacks arrays of unsigned 64-bit values using a fixed bit-width per element.
 /// </summary>
-public static class BitPacker
+internal static class BitPacker
 {
     /// <summary>
     /// Returns the number of bytes needed to pack <paramref name="count"/> values
@@ -119,7 +122,7 @@ public static class BitPacker
     {
         for (int i = 0; i < values.Length; i++)
         {
-            BitConverter.TryWriteBytes(destination[(i * 8)..], values[i]);
+            BinaryPrimitives.WriteUInt64LittleEndian(destination[(i * 8)..], values[i]);
         }
     }
 
@@ -127,7 +130,7 @@ public static class BitPacker
     {
         for (int i = 0; i < count; i++)
         {
-            destination[i] = BitConverter.ToUInt64(source[(i * 8)..]);
+            destination[i] = BinaryPrimitives.ReadUInt64LittleEndian(source[(i * 8)..]);
         }
     }
 }

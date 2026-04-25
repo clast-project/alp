@@ -1,10 +1,14 @@
+// Copyright (c) clast-project. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 
-namespace Alp.Benchmarks;
+namespace Clast.Alp.Benchmarks;
 
 [MemoryDiagnoser]
 [SimpleJob(RuntimeMoniker.Net80)]
+[SimpleJob(RuntimeMoniker.Net472)]
 public class AlpBenchmarks
 {
     private double[] _decimals2 = null!;
@@ -82,16 +86,16 @@ public class AlpBenchmarks
     // --- Encode ---
 
     [Benchmark]
-    public AlpEncodedData Encode_Decimals2() => AlpEncoder.Encode(_decimals2);
+    public object Encode_Decimals2() => AlpEncoder.Encode(_decimals2);
 
     [Benchmark]
-    public AlpEncodedData Encode_Decimals6() => AlpEncoder.Encode(_decimals6);
+    public object Encode_Decimals6() => AlpEncoder.Encode(_decimals6);
 
     [Benchmark]
-    public AlpEncodedData Encode_Integers() => AlpEncoder.Encode(_integers);
+    public object Encode_Integers() => AlpEncoder.Encode(_integers);
 
     [Benchmark]
-    public AlpEncodedData Encode_Mixed() => AlpEncoder.Encode(_mixed);
+    public object Encode_Mixed() => AlpEncoder.Encode(_mixed);
 
     // --- Decode ---
 

@@ -1,8 +1,14 @@
+// Copyright (c) clast-project. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+
 using System.Runtime.CompilerServices;
 
-namespace Alp;
+namespace Clast.Alp;
 
-public static class AlpConstants
+/// <summary>
+/// Numeric constants and lookup tables used by the ALP encoder and decoder.
+/// </summary>
+internal static class AlpConstants
 {
     /// <summary>
     /// Maximum exponent index for double precision (10^0 through 10^23).

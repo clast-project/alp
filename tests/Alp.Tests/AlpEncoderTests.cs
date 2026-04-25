@@ -1,4 +1,7 @@
-namespace Alp.Tests;
+// Copyright (c) clast-project. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+
+namespace Clast.Alp.Tests;
 
 public class AlpEncoderTests
 {
@@ -169,5 +172,27 @@ public class AlpEncoderTests
     {
         long encoded = AlpEncoder.EncodeValue(0.0, 5, 0);
         Assert.Equal(0, encoded);
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(24, 0)]
+    [InlineData(0, -1)]
+    [InlineData(0, 24)]
+    public void EncodeValue_RejectsOutOfRangeArguments(int exponent, int factor)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => AlpEncoder.EncodeValue(1.0, exponent, factor));
+    }
+
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(24, 0)]
+    [InlineData(0, -1)]
+    [InlineData(0, 19)]
+    public void DecodeValue_RejectsOutOfRangeArguments(int exponent, int factor)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => AlpDecoder.DecodeValue(1L, exponent, factor));
     }
 }

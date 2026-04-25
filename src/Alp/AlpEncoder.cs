@@ -1,6 +1,9 @@
+// Copyright (c) clast-project. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+
 using System.Runtime.CompilerServices;
 
-namespace Alp;
+namespace Clast.Alp;
 
 /// <summary>
 /// ALP (Adaptive Lossless floating-Point) encoder.
@@ -11,11 +14,17 @@ public static class AlpEncoder
 {
     /// <summary>
     /// Encodes a single double value as an int64 using the given exponent and factor indices.
+    /// Both <paramref name="exponent"/> and <paramref name="factor"/> must be in [0, 23].
     /// Uses the "magic number" fast-rounding trick.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static long EncodeValue(double value, int exponent, int factor)
     {
+        if ((uint)exponent > AlpConstants.MaxExponent)
+            throw new ArgumentOutOfRangeException(nameof(exponent), exponent, "Must be in [0, 23].");
+        if ((uint)factor > AlpConstants.MaxFactor)
+            throw new ArgumentOutOfRangeException(nameof(factor), factor, "Must be in [0, 23].");
+
         double scaled = value * AlpConstants.ExpArray[exponent] * AlpConstants.FracArray[factor];
         double rounded = scaled + AlpConstants.MagicNumber - AlpConstants.MagicNumber;
         return (long)rounded;
@@ -25,9 +34,9 @@ public static class AlpEncoder
     /// Checks whether a value can potentially be encoded (not NaN, Inf, or out of int64 range).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool CanEncode(double value, int exponent, int factor)
+    internal static bool CanEncode(double value, int exponent, int factor)
     {
-        if (!double.IsFinite(value))
+        if (!Polyfill.IsFinite(value))
             return false;
 
         double scaled = value * AlpConstants.ExpArray[exponent] * AlpConstants.FracArray[factor];
@@ -38,7 +47,7 @@ public static class AlpEncoder
     /// Checks whether encoding and then decoding a value produces the exact original value.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool RoundTrips(double value, int exponent, int factor)
+    internal static bool RoundTrips(double value, int exponent, int factor)
     {
         if (!CanEncode(value, exponent, factor))
             return false;
@@ -62,26 +71,30 @@ public static class AlpEncoder
         {
             int maxF = Math.Min(e, AlpConstants.MaxFactorIndex);
             double expMul = AlpConstants.ExpArray[e];
+            double fracE = AlpConstants.FracArray[e];
 
             for (int f = 0; f <= maxF; f++)
             {
                 double fracMul = AlpConstants.FracArray[f];
                 long factMul = AlpConstants.FactArray[f];
-                double fracE = AlpConstants.FracArray[e];
+
+                // Hoist the products that don't depend on the per-sample value.
+                double expFracMul = expMul * fracMul;
+                double factFracE = (double)factMul * fracE;
 
                 int exceptions = 0;
                 for (int i = 0; i < samples.Length; i++)
                 {
                     double v = samples[i];
 
-                    if (!double.IsFinite(v))
+                    if (!Polyfill.IsFinite(v))
                     {
                         if (++exceptions >= bestExceptions)
                             break;
                         continue;
                     }
 
-                    double scaled = v * expMul * fracMul;
+                    double scaled = v * expFracMul;
                     if (scaled <= AlpConstants.EncodingLowerLimit || scaled >= AlpConstants.EncodingUpperLimit)
                     {
                         if (++exceptions >= bestExceptions)
@@ -90,7 +103,7 @@ public static class AlpEncoder
                     }
 
                     double rounded = scaled + AlpConstants.MagicNumber - AlpConstants.MagicNumber;
-                    double decoded = (long)rounded * factMul * fracE;
+                    double decoded = (long)rounded * factFracE;
 
                     if (decoded != v)
                     {
@@ -115,19 +128,21 @@ public static class AlpEncoder
     }
 
     /// <summary>
-    /// Encodes an array of double values as int64 values using the given exponent and factor.
-    /// Values that do not round-trip are recorded as exceptions.
+    /// Encodes <paramref name="values"/> into <paramref name="destination"/> using the given
+    /// exponent and factor. Values that do not round-trip are recorded as exceptions and
+    /// their slots in <paramref name="destination"/> are filled with a sentinel encoded value.
+    /// Only the first <c>values.Length</c> entries of <paramref name="destination"/> are written.
     /// </summary>
-    public static AlpEncodedData Encode(ReadOnlySpan<double> values, int exponent, int factor)
+    internal static void EncodeInto(
+        ReadOnlySpan<double> values, int exponent, int factor,
+        Span<long> destination,
+        out int[] exceptionPositions, out double[] exceptionValues)
     {
-        long[] encoded = new long[values.Length];
-
         double expMul = AlpConstants.ExpArray[exponent];
         double fracMul = AlpConstants.FracArray[factor];
         long factMul = AlpConstants.FactArray[factor];
         double fracE = AlpConstants.FracArray[exponent];
 
-        // First pass: encode all values, count exceptions, find a fill value
         long fillValue = 0;
         bool hasFill = false;
         int exceptionCount = 0;
@@ -136,7 +151,7 @@ public static class AlpEncoder
         {
             double v = values[i];
 
-            if (!double.IsFinite(v))
+            if (!Polyfill.IsFinite(v))
             {
                 exceptionCount++;
                 continue;
@@ -159,7 +174,7 @@ public static class AlpEncoder
             }
             else
             {
-                encoded[i] = enc;
+                destination[i] = enc;
                 if (!hasFill)
                 {
                     fillValue = enc;
@@ -168,33 +183,26 @@ public static class AlpEncoder
             }
         }
 
-        // Fast path: no exceptions
         if (exceptionCount == 0)
         {
-            return new AlpEncodedData
-            {
-                EncodedValues = encoded,
-                Exponent = exponent,
-                Factor = factor,
-                ExceptionValues = [],
-                ExceptionPositions = [],
-            };
+            exceptionPositions = [];
+            exceptionValues = [];
+            return;
         }
 
-        // Second pass: collect exceptions and fill their slots
-        double[] exceptionValues = new double[exceptionCount];
-        int[] exceptionPositions = new int[exceptionCount];
+        exceptionPositions = new int[exceptionCount];
+        exceptionValues = new double[exceptionCount];
         int ei = 0;
 
         for (int i = 0; i < values.Length; i++)
         {
             double v = values[i];
 
-            if (!double.IsFinite(v))
+            if (!Polyfill.IsFinite(v))
             {
                 exceptionValues[ei] = v;
                 exceptionPositions[ei] = i;
-                encoded[i] = fillValue;
+                destination[i] = fillValue;
                 ei++;
                 continue;
             }
@@ -204,7 +212,7 @@ public static class AlpEncoder
             {
                 exceptionValues[ei] = v;
                 exceptionPositions[ei] = i;
-                encoded[i] = fillValue;
+                destination[i] = fillValue;
                 ei++;
                 continue;
             }
@@ -217,15 +225,25 @@ public static class AlpEncoder
             {
                 exceptionValues[ei] = v;
                 exceptionPositions[ei] = i;
-                encoded[i] = fillValue;
+                destination[i] = fillValue;
                 ei++;
             }
             else
             {
-                encoded[i] = enc;
+                destination[i] = enc;
             }
         }
+    }
 
+    /// <summary>
+    /// Encodes an array of double values as int64 values using the given exponent and factor.
+    /// Values that do not round-trip are recorded as exceptions.
+    /// </summary>
+    internal static AlpEncodedData Encode(ReadOnlySpan<double> values, int exponent, int factor)
+    {
+        long[] encoded = new long[values.Length];
+        EncodeInto(values, exponent, factor, encoded,
+            out int[] exceptionPositions, out double[] exceptionValues);
         return new AlpEncodedData
         {
             EncodedValues = encoded,
@@ -239,7 +257,7 @@ public static class AlpEncoder
     /// <summary>
     /// Convenience method: finds the best (exponent, factor) and encodes the values.
     /// </summary>
-    public static AlpEncodedData Encode(ReadOnlySpan<double> values)
+    internal static AlpEncodedData Encode(ReadOnlySpan<double> values)
     {
         var (exponent, factor) = FindBestFactorExponent(values);
         return Encode(values, exponent, factor);

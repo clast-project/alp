@@ -1,4 +1,9 @@
-namespace Alp.Tests;
+// Copyright (c) clast-project. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
+
+using System.Buffers;
+
+namespace Clast.Alp.Tests;
 
 public class AlpCompressorTests
 {
@@ -141,7 +146,11 @@ public class AlpCompressorTests
     public void Compress_AllIdentical_MinimalSize()
     {
         double[] values = new double[1024];
+#if NET472
+        for (int i = 0; i < values.Length; i++) values[i] = 42.0;
+#else
         Array.Fill(values, 42.0);
+#endif
 
         byte[] compressed = AlpCompressor.Compress(values);
 
@@ -176,10 +185,181 @@ public class AlpCompressorTests
         Assert.Equal(1, compressed[4]);    // version
     }
 
+    [Fact]
+    public void Compress_IBufferWriter_MatchesArrayOverload()
+    {
+        double[] values = [1.23, 4.56, 7.89, 10.11, 12.13];
+        byte[] expected = AlpCompressor.Compress(values);
+
+        var writer = new GrowingBufferWriter();
+        int written = AlpCompressor.Compress(values, writer);
+
+        Assert.Equal(expected.Length, written);
+        Assert.Equal(expected, writer.WrittenSpan.ToArray());
+    }
+
+    [Fact]
+    public void Compress_IBufferWriter_RoundTrips()
+    {
+        double[] values = new double[1024];
+        var rng = new Random(42);
+        for (int i = 0; i < values.Length; i++)
+            values[i] = Math.Round(rng.NextDouble() * 1000, 3);
+
+        var writer = new GrowingBufferWriter();
+        AlpCompressor.Compress(values, writer);
+
+        double[] decoded = AlpCompressor.Decompress(writer.WrittenSpan);
+        Assert.Equal(values, decoded);
+    }
+
+    [Fact]
+    public void Compress_IBufferWriter_EmptyInput()
+    {
+        var writer = new GrowingBufferWriter();
+        int written = AlpCompressor.Compress(default, writer);
+
+        Assert.Equal(24, written);
+        Assert.Empty(AlpCompressor.Decompress(writer.WrittenSpan));
+    }
+
+    [Fact]
+    public void Compress_IBufferWriter_NullThrows()
+    {
+        Assert.Throws<ArgumentNullException>(
+            () => AlpCompressor.Compress([1.0], null!));
+    }
+
+    [Fact]
+    public void Compress_RejectsBatchExceedingFormatLimit()
+    {
+        double[] tooMany = new double[ushort.MaxValue + 1];
+        Assert.Throws<ArgumentException>(() => AlpCompressor.Compress(tooMany));
+    }
+
+    [Fact]
+    public void Compress_AcceptsBatchAtFormatLimit()
+    {
+        double[] atLimit = new double[ushort.MaxValue];
+#if NET472
+        for (int i = 0; i < atLimit.Length; i++) atLimit[i] = 1.0;
+#else
+        Array.Fill(atLimit, 1.0);
+#endif
+        byte[] compressed = AlpCompressor.Compress(atLimit);
+        Assert.Equal(ushort.MaxValue, AlpCompressor.GetDecompressedLength(compressed));
+    }
+
+    [Fact]
+    public void GetDecompressedLength_ReturnsValueCount()
+    {
+        double[] values = [1.23, 4.56, 7.89, 10.11, 12.13];
+        byte[] compressed = AlpCompressor.Compress(values);
+
+        Assert.Equal(values.Length, AlpCompressor.GetDecompressedLength(compressed));
+    }
+
+    [Fact]
+    public void GetDecompressedLength_ZeroForEmptyInput()
+    {
+        byte[] compressed = AlpCompressor.Compress([]);
+        Assert.Equal(0, AlpCompressor.GetDecompressedLength(compressed));
+    }
+
+    [Fact]
+    public void GetDecompressedLength_RejectsBadMagic()
+    {
+        byte[] bad = new byte[24];
+        Assert.Throws<ArgumentException>(() => AlpCompressor.GetDecompressedLength(bad));
+    }
+
+    [Fact]
+    public void Decompress_IntoSpan_RoundTrips()
+    {
+        double[] values = [99.99, 100.01, 42.50, 0.01, 1234.56];
+        byte[] compressed = AlpCompressor.Compress(values);
+
+        double[] destination = new double[AlpCompressor.GetDecompressedLength(compressed)];
+        int written = AlpCompressor.Decompress(compressed, destination);
+
+        Assert.Equal(values.Length, written);
+        Assert.Equal(values, destination);
+    }
+
+    [Fact]
+    public void Decompress_IntoSpan_AcceptsLargerDestination()
+    {
+        double[] values = [1.0, 2.0, 3.0];
+        byte[] compressed = AlpCompressor.Compress(values);
+
+        double[] destination = new double[10];
+        int written = AlpCompressor.Decompress(compressed, destination);
+
+        Assert.Equal(values.Length, written);
+        Assert.Equal(values, destination.AsSpan(0, written).ToArray());
+    }
+
+    [Fact]
+    public void Decompress_IntoSpan_ThrowsWhenTooSmall()
+    {
+        double[] values = [1.0, 2.0, 3.0];
+        byte[] compressed = AlpCompressor.Compress(values);
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            double[] tooSmall = new double[2];
+            AlpCompressor.Decompress(compressed, tooSmall);
+        });
+    }
+
+    [Fact]
+    public void Decompress_IntoSpan_EmptyInputReturnsZero()
+    {
+        byte[] compressed = AlpCompressor.Compress([]);
+
+        Span<double> destination = default;
+        int written = AlpCompressor.Decompress(compressed, destination);
+
+        Assert.Equal(0, written);
+    }
+
     private static void AssertRoundTrip(double[] original)
     {
         byte[] compressed = AlpCompressor.Compress(original);
         double[] decoded = AlpCompressor.Decompress(compressed);
         Assert.Equal(original, decoded);
+    }
+
+    private sealed class GrowingBufferWriter : IBufferWriter<byte>
+    {
+        private byte[] _buffer = new byte[64];
+        private int _position;
+
+        public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _position);
+
+        public void Advance(int count) => _position += count;
+
+        public Memory<byte> GetMemory(int sizeHint = 0)
+        {
+            EnsureCapacity(sizeHint);
+            return _buffer.AsMemory(_position);
+        }
+
+        public Span<byte> GetSpan(int sizeHint = 0)
+        {
+            EnsureCapacity(sizeHint);
+            return _buffer.AsSpan(_position);
+        }
+
+        private void EnsureCapacity(int sizeHint)
+        {
+            if (sizeHint <= 0) sizeHint = 1;
+            int needed = _position + sizeHint;
+            if (needed > _buffer.Length)
+            {
+                int newSize = Math.Max(_buffer.Length * 2, needed);
+                Array.Resize(ref _buffer, newSize);
+            }
+        }
     }
 }
