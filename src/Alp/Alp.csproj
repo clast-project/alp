@@ -12,7 +12,8 @@
 
   <PropertyGroup>
     <PackageId>Clast.Alp</PackageId>
-    <Version>0.1.0</Version>
+    <!-- Default for local builds; release.yml overrides via -p:Version=<tag>. -->
+    <Version>0.0.0-dev</Version>
     <Authors>clast-project</Authors>
     <Copyright>Copyright (c) clast-project</Copyright>
     <Description>Adaptive Lossless floating-Point (ALP) compression for arrays of double values. Designed for decimal-style data such as prices, sensor readings, and scientific measurements.</Description>
