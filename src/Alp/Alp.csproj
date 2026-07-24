@@ -14,6 +14,15 @@
     <PackageId>Clast.Alp</PackageId>
     <!-- Default for local builds; release.yml overrides via -p:Version=<tag>. -->
     <Version>0.0.0-dev</Version>
+    <!-- Held across the whole 0.2.x line so consumers don't need a binding
+         redirect per patch. Under 0.x semver the minor is the breaking slot,
+         so bump this to 0.3.0.0 at the next breaking release. Hardcoded rather
+         than derived from $(Version), which the release tag overrides. -->
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+    <!-- FileVersion would otherwise default to the pinned AssemblyVersion; track
+         the real version so builds stay distinguishable. Skipped for prerelease
+         values, which are not valid Win32 file versions. -->
+    <FileVersion Condition="!$(Version.Contains('-'))">$(Version)</FileVersion>
     <Authors>clast-project</Authors>
     <Copyright>Copyright (c) clast-project</Copyright>
     <Description>Adaptive Lossless floating-Point (ALP) compression for arrays of double values. Designed for decimal-style data such as prices, sensor readings, and scientific measurements.</Description>
@@ -35,8 +44,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Alp.Tests" />
-    <InternalsVisibleTo Include="Alp.Benchmarks" />
+    <InternalsVisibleTo Include="Alp.Tests" Key="$(ClastPublicKey)" />
+    <InternalsVisibleTo Include="Alp.Benchmarks" Key="$(ClastPublicKey)" />
   </ItemGroup>
 
   <ItemGroup>
